@@ -250,11 +250,9 @@ public:
             return std::numeric_limits<size_t>::max();
         }
 
-        NodeBase<T>* first_node = first_location.parent;
-        NodeBase<T>* second_node = second_location.parent;
+        const size_t first_rank = rank_lower_bound(first);
+        const size_t second_rank = rank_lower_bound(second);
 
-        size_t first_rank = order_statistics(first_node);
-        size_t second_rank = order_statistics(second_node);
         if (first_rank >= second_rank) {
             return 0;
         }
@@ -267,9 +265,53 @@ public:
         if (!location.exists) {
             return std::numeric_limits<size_t>::max();
         }
-        return order_statistics(location.parent);
+        return rank_lower_bound(value);
     }
 
+    // Количество элементов в дереве.
+    size_t size() const { return subtree_size(root_); }
+
+    // Индекс первого элемента >= value; size() если такого нет.
+    size_t rank_lower_bound(const T& value) const {
+        const NodeBase<T>* current = root_;
+        const NodeBase<T>* candidate = &nil_;
+
+        while (!is_nil(current)) {
+            const T& current_value = as_node(current)->value();
+            if (current_value < value) {
+                current = current->right_child();
+            } else {
+                candidate = current;
+                current = current->left_child();
+            }
+        }
+
+        if (candidate == &nil_) {
+            return size();
+        }
+        return order_statistics(candidate);
+    }
+
+    // Индекс первого элемента > value; size() если такого нет.
+    size_t rank_upper_bound(const T& value) const {
+        const NodeBase<T>* current = root_;
+        const NodeBase<T>* candidate = &nil_;
+
+        while (!is_nil(current)) {
+            const T& current_value = as_node(current)->value();
+            if (value < current_value) {
+                candidate = current;
+                current = current->left_child();
+            } else {
+                current = current->right_child();
+            }
+        }
+
+        if (candidate == &nil_) {
+            return size();
+        }
+        return order_statistics(candidate);
+    }
 
 private:
     // Вспомогательная структура для locate.
