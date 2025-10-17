@@ -19,34 +19,22 @@ public:
     template <typename>
     friend class Tree;
 
-    // Возвращает цвет узла.
     Color color() const { return color_; }
-    // Устанавливает цвет узла.
     void set_color(Color c) { color_ = c; }
 
-    // Возвращает указатель на левого потомка.
     const NodeBase* left_child() const { return left_; }
-    // Возвращает изменяемый указатель на левого потомка.
     NodeBase* left_child() { return left_; }
-    // Устанавливает левого потомка.
     void set_left_child(NodeBase* l) { left_ = l; }
 
-    // Возвращает указатель на правого потомка.
     const NodeBase* right_child() const { return right_; }
-    // Возвращает изменяемый указатель на правого потомка.
     NodeBase* right_child() { return right_; }
-    // Устанавливает правого потомка.
     void set_right_child(NodeBase* r) { right_ = r; }
 
-    // Возвращает родителя.
     const NodeBase* parent() const { return parent_; }
-    // Возвращает изменяемого родителя.
     NodeBase* parent() { return parent_; }
-    // Устанавливает родителя.
     void set_parent(NodeBase* p) { parent_ = p; }
 
 protected:
-    // Создаёт базовый узел с указанными связями.
     NodeBase(Color c, NodeBase* l, NodeBase* r, NodeBase* p)
         : color_(c), left_(l), right_(r), parent_(p) {}
 
@@ -76,9 +64,7 @@ public:
          NodeBase<T>* p = nullptr)
         : NodeBase<T>(c, l, r, p), value_(std::move(v)) {}
 
-    // Возвращает значение узла.
     const T& value() const { return value_; }
-    // Возвращает изменяемое значение узла.
     T& value() { return value_; }
 
 private:
@@ -88,7 +74,7 @@ private:
 template <typename T>
 class Tree {
 public:
-    // Инициализирует пустое дерево со сторожевым узлом.
+    // Инициализирует пустое дерево со nil_ узлом.
     Tree()
         : nil_(NodeBase<T>::Color::BLACK, &nil_, &nil_, &nil_),
           root_(&nil_) {
@@ -235,6 +221,24 @@ public:
         return true;
     }
 
+    // Проверяет соблюдение инвариантов красно-чёрного дерева.
+    bool is_valid() const {
+        const NodeBase<T>* root = root_;
+        const NodeBase<T>* nil = &nil_;
+
+        if (root == nil) {
+            return root->color() == NodeBase<T>::Color::BLACK;
+        }
+
+        if (root->color() != NodeBase<T>::Color::BLACK) {
+            return false;
+        }
+
+        int black_height = 0;
+        return validate_subtree(root, nil, &black_height);
+    }
+
+
 private:
     // Вспомогательная структура для locate.
     struct LocateResult {
@@ -246,7 +250,6 @@ private:
     NodeBase<T> nil_;
     NodeBase<T>* root_;
 
-    // Проверяет, является ли указатель сторожевым узлом.
     bool is_nil(const NodeBase<T>* node) const { return node == &nil_; }
 
     // Приводит базовый указатель к типу Node<T>.
@@ -259,7 +262,7 @@ private:
         return static_cast<const Node<T>*>(node);
     }
 
-    // Возвращает цвет узла с учётом sentinel.
+    // Возвращает цвет узла с учётом nil_.
     typename NodeBase<T>::Color color_of(NodeBase<T>* node) const {
         return is_nil(node) ? NodeBase<T>::Color::BLACK : node->color();
     }
@@ -452,6 +455,8 @@ private:
         v->set_parent(u->parent());
     }
 
+    
+    // Обрабатывает случаи восстановления, когда текущий узел — левый ребёнок.
     NodeBase<T>* erase_fixup_left(NodeBase<T>* node) {
         NodeBase<T>* sibling = node->parent()->right_child();
         if (color_of(sibling) == NodeBase<T>::Color::RED) {
@@ -495,6 +500,7 @@ private:
         return root_;
     }
 
+    // Обрабатывает симметричные случаи, когда узел — правый ребёнок.
     NodeBase<T>* erase_fixup_right(NodeBase<T>* node) {
         NodeBase<T>* sibling = node->parent()->left_child();
         if (color_of(sibling) == NodeBase<T>::Color::RED) {
@@ -549,6 +555,45 @@ private:
             }
         }
         node->set_color(NodeBase<T>::Color::BLACK);
+    }
+
+    //рекурсивно проверяет инваринты поддерева
+    bool validate_subtree(const NodeBase<T>* node,
+                          const NodeBase<T>* nil,
+                          int* black_height_out) const {
+        if (node == nil) {
+            *black_height_out = 1;
+            return true;
+        }
+
+        const NodeBase<T>* left = node->left_child();
+        const NodeBase<T>* right = node->right_child();
+
+        if (node->color() == NodeBase<T>::Color::RED) {
+            if ((left != nil && left->color() == NodeBase<T>::Color::RED) ||
+                (right != nil && right->color() == NodeBase<T>::Color::RED)) {
+                return false;
+            }
+        }
+
+        int left_black_height = 0;
+        if (!validate_subtree(left, nil, &left_black_height)) {
+            return false;
+        }
+
+        int right_black_height = 0;
+        if (!validate_subtree(right, nil, &right_black_height)) {
+            return false;
+        }
+
+        if (left_black_height != right_black_height) {
+            return false;
+        }
+
+        *black_height_out =
+            left_black_height +
+            (node->color() == NodeBase<T>::Color::BLACK ? 1 : 0);
+        return true;
     }
 
     // Клонирует поддерево, используя другой sentinel.
