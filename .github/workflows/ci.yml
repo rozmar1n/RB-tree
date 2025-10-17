@@ -12,7 +12,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      - name: Cache CMake deps
+        uses: actions/cache@v3
+        with:
+          path: build/_deps
+          key: cmake-deps-${{ hashFiles('**/CMakeLists.txt', '.github/workflows/ci.yml') }}
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
