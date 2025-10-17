@@ -1,7 +1,10 @@
 #pragma once
 
 #include <cassert>
+#include <cstddef>
+#include <limits>
 #include <utility>
+#include <cstddef>
 
 namespace rb {
 
@@ -236,6 +239,35 @@ public:
 
         int black_height = 0;
         return validate_subtree(root, nil, &black_height);
+    }
+
+    // Возвращает количество элементов, расположенных строго между значениями.
+    size_t distance(const T& first, const T& second) const {
+        auto first_location = locate(first);
+        auto second_location = locate(second);
+
+        if (!first_location.exists || !second_location.exists) {
+            return std::numeric_limits<size_t>::max();
+        }
+
+        NodeBase<T>* first_node = first_location.parent;
+        NodeBase<T>* second_node = second_location.parent;
+
+        size_t first_rank = order_statistics(first_node);
+        size_t second_rank = order_statistics(second_node);
+        if (first_rank >= second_rank) {
+            return 0;
+        }
+        return second_rank - first_rank;
+    }
+
+    // Возвращает позицию элемента в упорядоченном обходе.
+    size_t distance_from_root(const T& value) const {
+        auto location = locate(value);
+        if (!location.exists) {
+            return std::numeric_limits<size_t>::max();
+        }
+        return order_statistics(location.parent);
     }
 
 
@@ -619,6 +651,34 @@ private:
         new_node->set_right_child(right_child);
 
         return new_node;
+    }
+
+    // Возвращает порядковый номер узла в симметричном обходе.
+    size_t order_statistics(const NodeBase<T>* node) const {
+        size_t count = 0;
+        const T& target = as_node(node)->value();
+        const NodeBase<T>* current = root_;
+        while (!is_nil(current)) {
+            const T& current_value = as_node(current)->value();
+            if (target < current_value) {
+                current = current->left_child();
+            } else if (current_value < target) {
+                count += subtree_size(current->left_child()) + 1;
+                current = current->right_child();
+            } else {
+                count += subtree_size(current->left_child());
+                break;
+            }
+        }
+        return count;
+    }
+
+    size_t subtree_size(const NodeBase<T>* node) const {
+        if (is_nil(node)) {
+            return 0;
+        }
+        return 1 + subtree_size(node->left_child()) +
+               subtree_size(node->right_child());
     }
 
     // Переназначает ссылку на sentinel после перемещения.

@@ -17,6 +17,10 @@ add_executable(rb_memory_test
     rb_memory_test.cpp
 )
 
+add_executable(rb_distance_test
+    rb_distance_test.cpp
+)
+
 target_link_libraries(rb_balance_test
     PRIVATE
         rb_tree
@@ -29,6 +33,13 @@ target_link_libraries(rb_memory_test
         GTest::gtest_main
 )
 
+target_link_libraries(rb_distance_test
+    PRIVATE
+        rb_tree
+        GTest::gtest_main
+)
+
 include(GoogleTest)
 gtest_discover_tests(rb_balance_test)
 gtest_discover_tests(rb_memory_test)
+gtest_discover_tests(rb_distance_test)
