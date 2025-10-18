@@ -174,52 +174,12 @@ public:
             return false;
         }
 
-        NodeBase<T>* z = result.parent;
-        NodeBase<T>* y = z;
-        auto y_original_color = y->color();
-        NodeBase<T>* x = &nil_;
+        NodeBase<T>* target = result.parent;
+        EraseContext ctx = detach_erase_target(target);
 
-        if (is_nil(z->left_child())) {
-            x = z->right_child();
-            transplant(z, z->right_child());
-        } else if (is_nil(z->right_child())) {
-            x = z->left_child();
-            transplant(z, z->left_child());
-        } else {
-            y = minimum(z->right_child());
-            y_original_color = y->color();
-            x = y->right_child();
-            if (y->parent() == z) {
-                x->set_parent(y);
-            } else {
-                transplant(y, y->right_child());
-                y->set_right_child(z->right_child());
-                if (!is_nil(y->right_child())) {
-                    y->right_child()->set_parent(y);
-                }
-            }
+        delete as_node(target);
 
-            transplant(z, y);
-            y->set_left_child(z->left_child());
-            if (!is_nil(y->left_child())) {
-                y->left_child()->set_parent(y);
-            }
-            y->set_color(z->color());
-        }
-
-        delete as_node(z);
-
-        if (y_original_color == NodeBase<T>::Color::BLACK) {
-            erase_fixup(x);
-        }
-
-        if (is_nil(root_)) {
-            root_ = &nil_;
-        } else {
-            root_->set_parent(&nil_);
-            root_->set_color(NodeBase<T>::Color::BLACK);
-        }
-
+        finalize_erase(ctx);
         return true;
     }
 
@@ -323,6 +283,13 @@ private:
     NodeBase<T> nil_;
     NodeBase<T>* root_;
 
+    using node_color = typename NodeBase<T>::Color;
+
+    struct EraseContext {
+        NodeBase<T>* fixup_node;
+        node_color removed_color;
+    };
+
     bool is_nil(const NodeBase<T>* node) const { return node == &nil_; }
 
     // Приводит базовый указатель к типу Node<T>.
@@ -336,7 +303,6 @@ private:
     }
 
     // Возвращает цвет узла с учётом nil_.
-    using node_color = typename NodeBase<T>::Color;
     node_color color_of(NodeBase<T>* node) const {
         return is_nil(node) ? NodeBase<T>::Color::BLACK : node->color();
     }
@@ -527,6 +493,57 @@ private:
             u->parent()->set_right_child(v);
         }
         v->set_parent(u->parent());
+    }
+
+    // Удаляет узел и готовит данные для восстановления баланса.
+    EraseContext detach_erase_target(NodeBase<T>* node) {
+        NodeBase<T>* successor = node;
+        node_color removed_color = successor->color();
+        NodeBase<T>* fixup_node = &nil_;
+
+        if (is_nil(node->left_child())) {
+            fixup_node = node->right_child();
+            transplant(node, node->right_child());
+        } else if (is_nil(node->right_child())) {
+            fixup_node = node->left_child();
+            transplant(node, node->left_child());
+        } else {
+            successor = minimum(node->right_child());
+            removed_color = successor->color();
+            fixup_node = successor->right_child();
+            if (successor->parent() == node) {
+                fixup_node->set_parent(successor);
+            } else {
+                transplant(successor, successor->right_child());
+                successor->set_right_child(node->right_child());
+                if (!is_nil(successor->right_child())) {
+                    successor->right_child()->set_parent(successor);
+                }
+            }
+
+            transplant(node, successor);
+            successor->set_left_child(node->left_child());
+            if (!is_nil(successor->left_child())) {
+                successor->left_child()->set_parent(successor);
+            }
+            successor->set_color(node->color());
+        }
+
+        return EraseContext{fixup_node, removed_color};
+    }
+
+    // Завершает процедуру удаления узла
+    void finalize_erase(const EraseContext& ctx) {
+        if (ctx.removed_color == NodeBase<T>::Color::BLACK) {
+            erase_fixup(ctx.fixup_node);
+        }
+
+        if (is_nil(root_)) {
+            root_ = &nil_;
+        } else {
+            root_->set_parent(&nil_);
+            root_->set_color(NodeBase<T>::Color::BLACK);
+        }
     }
     
     // Обрабатывает случаи восстановления, когда текущий узел — левый ребёнок.

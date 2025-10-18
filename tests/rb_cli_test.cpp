@@ -9,7 +9,7 @@ TEST(RBTreeCliTest, ProcessesSampleInput) {
     std::ostringstream output;
     std::ostringstream error;
 
-    const int exit_code = run_cli(input, output, error);
+    const int exit_code = rb::run_cli(input, output, error);
 
     EXPECT_EQ(exit_code, 0);
     EXPECT_EQ(output.str(), "2 0 3\n");

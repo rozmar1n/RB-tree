@@ -29,8 +29,9 @@ void handle_query(rb::Tree<int>& tree,
     output << result;
     first_output = false;
 }
-} // namespace
 
+} // namespace
+namespace rb {
 int run_cli(std::istream& input,
             std::ostream& output,
             std::ostream& error) {
@@ -65,4 +66,5 @@ int run_cli(std::istream& input,
     }
 
     return 0;
-}
+} 
+} //namespace rb

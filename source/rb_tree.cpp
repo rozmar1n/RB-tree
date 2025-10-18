@@ -3,5 +3,5 @@
 #include <iostream>
 
 int main() {
-    return run_cli(std::cin, std::cout, std::cerr);
+    return rb::run_cli(std::cin, std::cout, std::cerr);
 }
