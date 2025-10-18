@@ -167,7 +167,7 @@ public:
     // Проверяет, пусто ли дерево.
     bool empty() const { return root_ == &nil_; }
 
-    // Вставляет значение, возвращает false при наличии дубликата.
+    // Вставляет значение, поддерживая баланс и статистики; false при дубликате.
     bool insert(const T& value) {
         auto result = locate(value);
         if (result.exists) {
@@ -194,7 +194,7 @@ public:
         return true;
     }
 
-    // Удаляет значение из дерева, если оно присутствует.
+    // Удаляет значение, восстанавливая баланс; возвращает false, если узла нет.
     bool erase(const T& value) {
         auto result = locate(value);
         if (!result.exists) {
@@ -257,7 +257,7 @@ public:
     // Количество элементов в дереве.
     size_t size() const { return node_size(root_); }
 
-    // Индекс первого элемента >= value; size() если такого нет.
+    // Количество элементов < value (индекс нижней границы); size(), если нет.
     size_t rank_lower_bound(const T& value) const {
         const NodeBase<T>* current = root_;
         size_t result = 0;
@@ -275,7 +275,7 @@ public:
         return result;
     }
 
-    // Индекс первого элемента > value; size() если такого нет.
+    // Количество элементов <= value (индекс верхней границы); size(), если нет.
     size_t rank_upper_bound(const T& value) const {
         const NodeBase<T>* current = root_;
         size_t result = 0;
@@ -306,6 +306,7 @@ private:
 
     using node_color = typename NodeBase<T>::Color;
 
+    // Набор данных, необходимый для корректного завершения erase.
     struct EraseContext {
         NodeBase<T>* fixup_node;
         node_color removed_color;
@@ -329,12 +330,12 @@ private:
         return is_nil(node) ? NodeBase<T>::Color::BLACK : node->color();
     }
 
-    // Возвращает количество элементов в поддереве.
+    // Возвращает количество элементов в поддереве узла; 0 для nil_.
     std::size_t node_size(const NodeBase<T>* node) const {
         return is_nil(node) ? 0 : node->subtree_size();
     }
 
-    // Обновляет количество элементов в поддереве.
+    // Пересчитывает размер поддерева на основе детей.
     void recalc_size(NodeBase<T>* node) {
         if (is_nil(node)) {
             return;
@@ -344,7 +345,7 @@ private:
         node->set_subtree_size(left + right + 1);
     }
 
-    // Обновляет количество элементов в поддереве до корня.
+    // Поддерживает размеры всех предков узла актуальными.
     void update_size_upwards(NodeBase<T>* node) {
         while (!is_nil(node)) {
             recalc_size(node);
@@ -352,6 +353,7 @@ private:
         }
     }
 
+    // Создаёт узел со всеми обязательными ссылками на nil_.
     Node<T>* make_node(const T& value,
                        node_color color,
                        NodeBase<T>* left,
@@ -371,7 +373,7 @@ private:
         return node;
     }
 
-    // Создаёт узел с перемещением значения.
+    // Перегрузка для перемещающего создания узла.
     Node<T>* make_node(T&& value,
                        node_color color,
                        NodeBase<T>* left,
@@ -392,7 +394,7 @@ private:
         return node;
     }
     
-    // Обертка над detete
+    // Освобождает динамически выделенный узел (игнорируя nil_).
     void destroy_node(NodeBase<T>* node) {
         if (!is_nil(node)) {
             delete as_node(node);
@@ -432,7 +434,7 @@ private:
         return {parent, false, go_left};
     }
 
-    // Выполняет левый поворот вокруг узла.
+    // Выполняет левый поворот с обновлением размеров поддеревьев.
     void rotate_left(NodeBase<T>* node) {
         NodeBase<T>* pivot = node->right_child();
         assert(!is_nil(pivot));
@@ -463,7 +465,7 @@ private:
         update_size_upwards(pivot_parent);
     }
 
-    // Выполняет правый поворот вокруг узла.
+    // Выполняет правый поворот с обновлением размеров поддеревьев.
     void rotate_right(NodeBase<T>* node) {
         NodeBase<T>* pivot = node->left_child();
         assert(!is_nil(pivot));
@@ -588,7 +590,7 @@ private:
         return node;
     }
 
-    // Заменяет одно поддерево другим.
+    // Заменяет одно поддерево другим и обновляет накопленные размеры.
     void transplant(NodeBase<T>* u, NodeBase<T>* v) {
         NodeBase<T>* parent = u->parent();
 
@@ -603,7 +605,7 @@ private:
         update_size_upwards(parent);
     }
 
-    // Удаляет узел и готовит данные для восстановления баланса.
+    // Отсоединяет целевой узел, подготавливая данные для erase_fixup.
     EraseContext detach_erase_target(NodeBase<T>* node) {
         NodeBase<T>* successor = node;
         node_color removed_color = successor->color();
@@ -645,7 +647,7 @@ private:
         return EraseContext{fixup_node, removed_color, replacement_node};
     }
 
-    // Завершает процедуру удаления узла
+    // Завершает процедуру удаления, чиня баланс и пересчитывая размеры.
     void finalize_erase(const EraseContext& ctx) {
         if (ctx.removed_color == NodeBase<T>::Color::BLACK) {
             erase_fixup(ctx.fixup_node);
@@ -809,7 +811,7 @@ private:
         return true;
     }
 
-    // Клонирует поддерево, используя другой sentinel.
+    // Клонирует поддерево, используя другой nil_.
     NodeBase<T>* clone_subtree(const NodeBase<T>* node,
                                NodeBase<T>* parent,
                                const NodeBase<T>* other_nil) {
@@ -862,7 +864,7 @@ private:
         return node_size(node);
     }
 
-    // Переназначает ссылку на sentinel после перемещения.
+    // Переназначает ссылку на nil_ после перемещения.
     void rebind_nil(NodeBase<T>* node,
                     NodeBase<T>* old_nil,
                     NodeBase<T>* new_nil) {
@@ -889,7 +891,7 @@ private:
         }
     }
 
-    // Возвращает sentinel в исходное состояние.
+    // Возвращает nil_ в исходное состояние.
     void reset_nil_links() {
         nil_.set_left_child(&nil_);
         nil_.set_right_child(&nil_);
