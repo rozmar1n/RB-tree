@@ -20,3 +20,9 @@ target_link_libraries(rb_tree_cli
 )
 
 add_executable(std_set_cli std_set_cli.cpp)
+
+add_executable(rb_benchmark rb_benchmark.cpp)
+target_link_libraries(rb_benchmark
+    PRIVATE
+        rb_tree
+)

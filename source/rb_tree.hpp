@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <limits>
 #include <utility>
-#include <cstddef>
 
 namespace rb {
 
@@ -241,7 +240,7 @@ public:
         return validate_subtree(root, nil, &black_height);
     }
 
-    // Возвращает количество элементов, расположенных строго между значениями.
+    // Возвращает количество элементов, расположенныхв диапазоне [first, second).
     size_t distance(const T& first, const T& second) const {
         auto first_location = locate(first);
         auto second_location = locate(second);
@@ -337,7 +336,8 @@ private:
     }
 
     // Возвращает цвет узла с учётом nil_.
-    typename NodeBase<T>::Color color_of(NodeBase<T>* node) const {
+    using node_color = typename NodeBase<T>::Color;
+    node_color color_of(NodeBase<T>* node) const {
         return is_nil(node) ? NodeBase<T>::Color::BLACK : node->color();
     }
 
@@ -528,7 +528,6 @@ private:
         }
         v->set_parent(u->parent());
     }
-
     
     // Обрабатывает случаи восстановления, когда текущий узел — левый ребёнок.
     NodeBase<T>* erase_fixup_left(NodeBase<T>* node) {
