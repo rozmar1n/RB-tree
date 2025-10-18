@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <limits>
+#include <type_traits>
 #include <utility>
 
 namespace rb {
@@ -36,15 +37,27 @@ public:
     NodeBase* parent() { return parent_; }
     void set_parent(NodeBase* p) { parent_ = p; }
 
+    std::size_t subtree_size() const { return subtree_size_; }
+    void set_subtree_size(std::size_t size) { subtree_size_ = size; }
+
 protected:
-    NodeBase(Color c, NodeBase* l, NodeBase* r, NodeBase* p)
-        : color_(c), left_(l), right_(r), parent_(p) {}
+    NodeBase(Color c,
+             NodeBase* l,
+             NodeBase* r,
+             NodeBase* p,
+             std::size_t subtree_size = 0)
+        : color_(c),
+          left_(l),
+          right_(r),
+          parent_(p),
+          subtree_size_(subtree_size) {}
 
 private:
     Color color_;
     NodeBase* left_;
     NodeBase* right_;
     NodeBase* parent_;
+    std::size_t subtree_size_;
 };
 
 template <typename T>
@@ -56,7 +69,7 @@ public:
          NodeBase<T>* l = nullptr,
          NodeBase<T>* r = nullptr,
          NodeBase<T>* p = nullptr)
-        : NodeBase<T>(c, l, r, p), value_(v) {}
+        : NodeBase<T>(c, l, r, p, 1), value_(v) {}
 
     // Создаёт узел с перемещением значения.
     Node(T&& v,
@@ -64,7 +77,7 @@ public:
          NodeBase<T>* l = nullptr,
          NodeBase<T>* r = nullptr,
          NodeBase<T>* p = nullptr)
-        : NodeBase<T>(c, l, r, p), value_(std::move(v)) {}
+        : NodeBase<T>(c, l, r, p, 1), value_(std::move(v)) {}
 
     const T& value() const { return value_; }
     T& value() { return value_; }
@@ -76,6 +89,19 @@ private:
 template <typename T>
 class Tree {
 public:
+    static_assert(std::is_copy_constructible_v<T>,
+                  "rb::Tree<T> requires T to be copy-constructible");
+    static_assert(std::is_move_constructible_v<T>,
+                  "rb::Tree<T> requires T to be move-constructible");
+    static_assert(std::is_copy_assignable_v<T>,
+                  "rb::Tree<T> requires T to be copy-assignable");
+    static_assert(std::is_move_assignable_v<T>,
+                  "rb::Tree<T> requires T to be move-assignable");
+    static_assert(std::is_convertible_v<
+                      decltype(std::declval<const T&>() < std::declval<const T&>()),
+                      bool>,
+                  "rb::Tree<T> requires operator< to establish a strict ordering");
+
     // Инициализирует пустое дерево со nil_ узлом.
     Tree()
         : nil_(NodeBase<T>::Color::BLACK, &nil_, &nil_, &nil_),
@@ -149,11 +175,11 @@ public:
         }
 
         auto* parent = result.parent;
-        auto* new_node = new Node<T>(value,
-                                     NodeBase<T>::Color::RED,
-                                     &nil_,
-                                     &nil_,
-                                     parent);
+        auto* new_node = make_node(value,
+                                   NodeBase<T>::Color::RED,
+                                   &nil_,
+                                   &nil_,
+                                   parent);
 
         if (parent == &nil_) {
             root_ = new_node;
@@ -164,6 +190,7 @@ public:
         }
 
         insert_case1(new_node);
+        update_size_upwards(new_node);
         return true;
     }
 
@@ -177,7 +204,7 @@ public:
         NodeBase<T>* target = result.parent;
         EraseContext ctx = detach_erase_target(target);
 
-        delete as_node(target);
+        destroy_node(target);
 
         finalize_erase(ctx);
         return true;
@@ -228,48 +255,42 @@ public:
     }
 
     // Количество элементов в дереве.
-    size_t size() const { return subtree_size(root_); }
+    size_t size() const { return node_size(root_); }
 
     // Индекс первого элемента >= value; size() если такого нет.
     size_t rank_lower_bound(const T& value) const {
         const NodeBase<T>* current = root_;
-        const NodeBase<T>* candidate = &nil_;
+        size_t result = 0;
 
         while (!is_nil(current)) {
             const T& current_value = as_node(current)->value();
             if (current_value < value) {
+                result += node_size(current->left_child()) + 1;
                 current = current->right_child();
             } else {
-                candidate = current;
                 current = current->left_child();
             }
         }
 
-        if (candidate == &nil_) {
-            return size();
-        }
-        return order_statistics(candidate);
+        return result;
     }
 
     // Индекс первого элемента > value; size() если такого нет.
     size_t rank_upper_bound(const T& value) const {
         const NodeBase<T>* current = root_;
-        const NodeBase<T>* candidate = &nil_;
+        size_t result = 0;
 
         while (!is_nil(current)) {
             const T& current_value = as_node(current)->value();
             if (value < current_value) {
-                candidate = current;
                 current = current->left_child();
             } else {
+                result += node_size(current->left_child()) + 1;
                 current = current->right_child();
             }
         }
 
-        if (candidate == &nil_) {
-            return size();
-        }
-        return order_statistics(candidate);
+        return result;
     }
 
 private:
@@ -288,6 +309,7 @@ private:
     struct EraseContext {
         NodeBase<T>* fixup_node;
         node_color removed_color;
+        NodeBase<T>* replacement_node;
     };
 
     bool is_nil(const NodeBase<T>* node) const { return node == &nil_; }
@@ -307,6 +329,76 @@ private:
         return is_nil(node) ? NodeBase<T>::Color::BLACK : node->color();
     }
 
+    // Возвращает количество элементов в поддереве.
+    std::size_t node_size(const NodeBase<T>* node) const {
+        return is_nil(node) ? 0 : node->subtree_size();
+    }
+
+    // Обновляет количество элементов в поддереве.
+    void recalc_size(NodeBase<T>* node) {
+        if (is_nil(node)) {
+            return;
+        }
+        const std::size_t left = node_size(node->left_child());
+        const std::size_t right = node_size(node->right_child());
+        node->set_subtree_size(left + right + 1);
+    }
+
+    // Обновляет количество элементов в поддереве до корня.
+    void update_size_upwards(NodeBase<T>* node) {
+        while (!is_nil(node)) {
+            recalc_size(node);
+            node = node->parent();
+        }
+    }
+
+    Node<T>* make_node(const T& value,
+                       node_color color,
+                       NodeBase<T>* left,
+                       NodeBase<T>* right,
+                       NodeBase<T>* parent) {
+        if (left == nullptr) {
+            left = &nil_;
+        }
+        if (right == nullptr) {
+            right = &nil_;
+        }
+        if (parent == nullptr) {
+            parent = &nil_;
+        }
+        auto* node = new Node<T>(value, color, left, right, parent);
+        recalc_size(node);
+        return node;
+    }
+
+    // Создаёт узел с перемещением значения.
+    Node<T>* make_node(T&& value,
+                       node_color color,
+                       NodeBase<T>* left,
+                       NodeBase<T>* right,
+                       NodeBase<T>* parent) {
+        if (left == nullptr) {
+            left = &nil_;
+        }
+        if (right == nullptr) {
+            right = &nil_;
+        }
+        if (parent == nullptr) {
+            parent = &nil_;
+        }
+        auto* node =
+            new Node<T>(std::move(value), color, left, right, parent);
+        recalc_size(node);
+        return node;
+    }
+    
+    // Обертка над detete
+    void destroy_node(NodeBase<T>* node) {
+        if (!is_nil(node)) {
+            delete as_node(node);
+        }
+    }
+
     // Очищает поддерево, освобождая все узлы.
     void clear(NodeBase<T>* node) {
         if (is_nil(node)) {
@@ -314,7 +406,7 @@ private:
         }
         clear(node->left_child());
         clear(node->right_child());
-        delete as_node(node);
+        destroy_node(node);
     }
 
     // Находит место вставки или существующий узел.
@@ -345,14 +437,17 @@ private:
         NodeBase<T>* pivot = node->right_child();
         assert(!is_nil(pivot));
 
-        pivot->set_parent(node->parent());
-        if (node->parent() == &nil_) {
+        NodeBase<T>* pivot_parent = node->parent();
+        if (pivot_parent == &nil_) {
             root_ = pivot;
             pivot->set_parent(&nil_);
-        } else if (node == node->parent()->left_child()) {
-            node->parent()->set_left_child(pivot);
         } else {
-            node->parent()->set_right_child(pivot);
+            pivot->set_parent(pivot_parent);
+            if (node == pivot_parent->left_child()) {
+                pivot_parent->set_left_child(pivot);
+            } else {
+                pivot_parent->set_right_child(pivot);
+            }
         }
 
         node->set_right_child(pivot->left_child());
@@ -362,6 +457,10 @@ private:
 
         pivot->set_left_child(node);
         node->set_parent(pivot);
+
+        recalc_size(node);
+        recalc_size(pivot);
+        update_size_upwards(pivot_parent);
     }
 
     // Выполняет правый поворот вокруг узла.
@@ -369,14 +468,17 @@ private:
         NodeBase<T>* pivot = node->left_child();
         assert(!is_nil(pivot));
 
-        pivot->set_parent(node->parent());
-        if (node->parent() == &nil_) {
+        NodeBase<T>* pivot_parent = node->parent();
+        if (pivot_parent == &nil_) {
             root_ = pivot;
             pivot->set_parent(&nil_);
-        } else if (node == node->parent()->left_child()) {
-            node->parent()->set_left_child(pivot);
         } else {
-            node->parent()->set_right_child(pivot);
+            pivot->set_parent(pivot_parent);
+            if (node == pivot_parent->left_child()) {
+                pivot_parent->set_left_child(pivot);
+            } else {
+                pivot_parent->set_right_child(pivot);
+            }
         }
 
         node->set_left_child(pivot->right_child());
@@ -386,6 +488,9 @@ private:
 
         pivot->set_right_child(node);
         node->set_parent(pivot);
+        recalc_size(node);
+        recalc_size(pivot);
+        update_size_upwards(pivot_parent);
     }
 
     // Возвращает деда для текущего узла.
@@ -485,14 +590,17 @@ private:
 
     // Заменяет одно поддерево другим.
     void transplant(NodeBase<T>* u, NodeBase<T>* v) {
-        if (u->parent() == &nil_) {
+        NodeBase<T>* parent = u->parent();
+
+        if (parent == &nil_) {
             root_ = v;
-        } else if (u == u->parent()->left_child()) {
-            u->parent()->set_left_child(v);
+        } else if (u == parent->left_child()) {
+            parent->set_left_child(v);
         } else {
-            u->parent()->set_right_child(v);
+            parent->set_right_child(v);
         }
-        v->set_parent(u->parent());
+        v->set_parent(parent);
+        update_size_upwards(parent);
     }
 
     // Удаляет узел и готовит данные для восстановления баланса.
@@ -500,13 +608,16 @@ private:
         NodeBase<T>* successor = node;
         node_color removed_color = successor->color();
         NodeBase<T>* fixup_node = &nil_;
+        NodeBase<T>* replacement_node = &nil_;
 
         if (is_nil(node->left_child())) {
             fixup_node = node->right_child();
             transplant(node, node->right_child());
+            replacement_node = fixup_node;
         } else if (is_nil(node->right_child())) {
             fixup_node = node->left_child();
             transplant(node, node->left_child());
+            replacement_node = fixup_node;
         } else {
             successor = minimum(node->right_child());
             removed_color = successor->color();
@@ -527,15 +638,27 @@ private:
                 successor->left_child()->set_parent(successor);
             }
             successor->set_color(node->color());
+            replacement_node = successor;
+            update_size_upwards(successor);
         }
 
-        return EraseContext{fixup_node, removed_color};
+        return EraseContext{fixup_node, removed_color, replacement_node};
     }
 
     // Завершает процедуру удаления узла
     void finalize_erase(const EraseContext& ctx) {
         if (ctx.removed_color == NodeBase<T>::Color::BLACK) {
             erase_fixup(ctx.fixup_node);
+        }
+
+        NodeBase<T>* fixup_update = ctx.fixup_node;
+        if (is_nil(fixup_update)) {
+            fixup_update = fixup_update->parent();
+        }
+        update_size_upwards(fixup_update);
+
+        if (!is_nil(ctx.replacement_node)) {
+            update_size_upwards(ctx.replacement_node);
         }
 
         if (is_nil(root_)) {
@@ -694,11 +817,11 @@ private:
             return &nil_;
         }
 
-        auto* new_node = new Node<T>(as_node(node)->value(),
-                                     node->color(),
-                                     &nil_,
-                                     &nil_,
-                                     parent);
+        auto* new_node = make_node(as_node(node)->value(),
+                                   node->color(),
+                                   &nil_,
+                                   &nil_,
+                                   parent);
 
         NodeBase<T>* left_child =
             clone_subtree(node->left_child(), new_node, other_nil);
@@ -708,6 +831,7 @@ private:
             clone_subtree(node->right_child(), new_node, other_nil);
         new_node->set_right_child(right_child);
 
+        recalc_size(new_node);
         return new_node;
     }
 
@@ -735,8 +859,7 @@ private:
         if (is_nil(node)) {
             return 0;
         }
-        return 1 + subtree_size(node->left_child()) +
-               subtree_size(node->right_child());
+        return node_size(node);
     }
 
     // Переназначает ссылку на sentinel после перемещения.
@@ -772,6 +895,7 @@ private:
         nil_.set_right_child(&nil_);
         nil_.set_parent(&nil_);
         nil_.set_color(NodeBase<T>::Color::BLACK);
+        nil_.set_subtree_size(0);
     }
 };
 
