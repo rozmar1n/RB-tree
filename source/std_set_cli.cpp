@@ -20,7 +20,7 @@ int main() {
                 return 1;
             }
 
-            if (right <= left) {
+            if (right < left) {
                 if (!first_output) {
                     std::cout << ' ';
                 }
@@ -29,7 +29,7 @@ int main() {
                 continue;
             }
 
-            const auto begin = tree.upper_bound(left);
+            const auto begin = tree.lower_bound(left);
             const auto end = tree.upper_bound(right);
             const auto result = std::distance(begin, end);
 
