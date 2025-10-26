@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <limits>
+#include <vector>
 #include <type_traits>
 #include <utility>
 
@@ -112,7 +113,6 @@ public:
     // Освобождает все узлы дерева.
     ~Tree() {
         clear(root_);
-        root_ = &nil_;
     }
 
     // Выполняет глубокое копирование.
@@ -406,9 +406,30 @@ private:
         if (is_nil(node)) {
             return;
         }
-        clear(node->left_child());
-        clear(node->right_child());
-        destroy_node(node);
+
+        std::vector<NodeBase<T>*> stack;
+        stack.push_back(node);
+
+        while (!stack.empty()) {
+            NodeBase<T>* current = stack.back();
+            stack.pop_back();
+
+            if (is_nil(current)) {
+                continue;
+            }
+
+            NodeBase<T>* left = current->left_child();
+            if (!is_nil(left)) {
+                stack.push_back(left);
+            }
+
+            NodeBase<T>* right = current->right_child();
+            if (!is_nil(right)) {
+                stack.push_back(right);
+            }
+
+            destroy_node(current);
+        }
     }
 
     // Находит место вставки или существующий узел.
