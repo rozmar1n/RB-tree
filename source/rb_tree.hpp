@@ -201,12 +201,13 @@ public:
             return false;
         }
 
-        NodeBase<T>* target = result.parent;
-        EraseContext ctx = detach_erase_target(target);
+        NodeBase<T>* z = result.parent;
+        DetachResult detach = detach_node(z);
+        destroy_node(z);
 
-        destroy_node(target);
-
-        finalize_erase(ctx);
+        if (detach.removed_color == node_color::BLACK) {
+            erase_fixup(detach.fixup);
+        }
         return true;
     }
 
@@ -306,11 +307,9 @@ private:
 
     using node_color = typename NodeBase<T>::Color;
 
-    // Набор данных, необходимый для корректного завершения erase.
-    struct EraseContext {
-        NodeBase<T>* fixup_node;
+    struct DetachResult {
+        NodeBase<T>* fixup;
         node_color removed_color;
-        NodeBase<T>* replacement_node;
     };
 
     bool is_nil(const NodeBase<T>* node) const { return node == &nil_; }
@@ -326,8 +325,20 @@ private:
     }
 
     // Возвращает цвет узла с учётом nil_.
-    node_color color_of(NodeBase<T>* node) const {
+    node_color color_of(const NodeBase<T>* node) const {
         return is_nil(node) ? NodeBase<T>::Color::BLACK : node->color();
+    }
+
+    node_color color_of(NodeBase<T>* node) const {
+        return color_of(static_cast<const NodeBase<T>*>(node));
+    }
+
+    bool is_black(const NodeBase<T>* node) const {
+        return color_of(node) == node_color::BLACK;
+    }
+
+    bool is_red(const NodeBase<T>* node) const {
+        return color_of(node) == node_color::RED;
     }
 
     // Возвращает количество элементов в поддереве узла; 0 для nil_.
@@ -611,6 +622,42 @@ private:
         return node;
     }
 
+    // Переустанавливает узлы перед удалением, возвращая данные для исправления.
+    DetachResult detach_node(NodeBase<T>* z) {
+        NodeBase<T>* y = z;
+        node_color removed_color = y->color();
+        NodeBase<T>* x = &nil_;
+
+        if (is_nil(z->left_child())) {
+            x = z->right_child();
+            transplant(z, z->right_child());
+        } else if (is_nil(z->right_child())) {
+            x = z->left_child();
+            transplant(z, z->left_child());
+        } else {
+            y = minimum(z->right_child());
+            removed_color = y->color();
+            x = y->right_child();
+
+            if (y->parent() != z) {
+                transplant(y, y->right_child());
+                y->set_right_child(z->right_child());
+                y->right_child()->set_parent(y);
+            } else {
+                x->set_parent(y);
+            }
+
+            transplant(z, y);
+            y->set_left_child(z->left_child());
+            y->left_child()->set_parent(y);
+            y->set_color(z->color());
+            recalc_size(y);
+            update_size_upwards(y);
+        }
+
+        return {x, removed_color};
+    }
+
     // Заменяет одно поддерево другим и обновляет накопленные размеры.
     void transplant(NodeBase<T>* u, NodeBase<T>* v) {
         NodeBase<T>* parent = u->parent();
@@ -626,171 +673,82 @@ private:
         update_size_upwards(parent);
     }
 
-    // Отсоединяет целевой узел, подготавливая данные для erase_fixup.
-    EraseContext detach_erase_target(NodeBase<T>* node) {
-        NodeBase<T>* successor = node;
-        node_color removed_color = successor->color();
-        NodeBase<T>* fixup_node = &nil_;
-        NodeBase<T>* replacement_node = &nil_;
-
-        if (is_nil(node->left_child())) {
-            fixup_node = node->right_child();
-            transplant(node, node->right_child());
-            replacement_node = fixup_node;
-        } else if (is_nil(node->right_child())) {
-            fixup_node = node->left_child();
-            transplant(node, node->left_child());
-            replacement_node = fixup_node;
-        } else {
-            successor = minimum(node->right_child());
-            removed_color = successor->color();
-            fixup_node = successor->right_child();
-            if (successor->parent() == node) {
-                fixup_node->set_parent(successor);
-            } else {
-                transplant(successor, successor->right_child());
-                successor->set_right_child(node->right_child());
-                if (!is_nil(successor->right_child())) {
-                    successor->right_child()->set_parent(successor);
-                }
-            }
-
-            transplant(node, successor);
-            successor->set_left_child(node->left_child());
-            if (!is_nil(successor->left_child())) {
-                successor->left_child()->set_parent(successor);
-            }
-            successor->set_color(node->color());
-            replacement_node = successor;
-            update_size_upwards(successor);
-        }
-
-        return EraseContext{fixup_node, removed_color, replacement_node};
-    }
-
-    // Завершает процедуру удаления, чиня баланс и пересчитывая размеры.
-    void finalize_erase(const EraseContext& ctx) {
-        if (ctx.removed_color == NodeBase<T>::Color::BLACK) {
-            erase_fixup(ctx.fixup_node);
-        }
-
-        NodeBase<T>* fixup_update = ctx.fixup_node;
-        if (is_nil(fixup_update)) {
-            fixup_update = fixup_update->parent();
-        }
-        update_size_upwards(fixup_update);
-
-        if (!is_nil(ctx.replacement_node)) {
-            update_size_upwards(ctx.replacement_node);
-        }
-
-        if (is_nil(root_)) {
-            root_ = &nil_;
-        } else {
-            root_->set_parent(&nil_);
-            root_->set_color(NodeBase<T>::Color::BLACK);
+    void paint(NodeBase<T>* node, node_color color) {
+        if (!is_nil(node)) {
+            node->set_color(color);
         }
     }
-    
-    // Обрабатывает случаи восстановления, когда текущий узел — левый ребёнок.
+
     NodeBase<T>* erase_fixup_left(NodeBase<T>* node) {
         NodeBase<T>* sibling = node->parent()->right_child();
-        if (color_of(sibling) == NodeBase<T>::Color::RED) {
-            if (!is_nil(sibling)) {
-                sibling->set_color(NodeBase<T>::Color::BLACK);
-            }
-            node->parent()->set_color(NodeBase<T>::Color::RED);
+
+        if (is_red(sibling)) {
+            paint(sibling, node_color::BLACK);
+            paint(node->parent(), node_color::RED);
             rotate_left(node->parent());
             sibling = node->parent()->right_child();
         }
 
-        bool sibling_children_black =
-            color_of(sibling->left_child()) == NodeBase<T>::Color::BLACK &&
-            color_of(sibling->right_child()) == NodeBase<T>::Color::BLACK;
-        if (sibling_children_black) {
-            if (!is_nil(sibling)) {
-                sibling->set_color(NodeBase<T>::Color::RED);
-            }
+        if (is_black(sibling->left_child()) &&
+            is_black(sibling->right_child())) {
+            paint(sibling, node_color::RED);
             return node->parent();
         }
 
-        if (color_of(sibling->right_child()) == NodeBase<T>::Color::BLACK) {
-            if (!is_nil(sibling->left_child())) {
-                sibling->left_child()->set_color(NodeBase<T>::Color::BLACK);
-            }
-            if (!is_nil(sibling)) {
-                sibling->set_color(NodeBase<T>::Color::RED);
-            }
+        if (is_black(sibling->right_child())) {
+            paint(sibling->left_child(), node_color::BLACK);
+            paint(sibling, node_color::RED);
             rotate_right(sibling);
             sibling = node->parent()->right_child();
         }
 
-        if (!is_nil(sibling)) {
-            sibling->set_color(node->parent()->color());
-        }
-        node->parent()->set_color(NodeBase<T>::Color::BLACK);
-        if (!is_nil(sibling->right_child())) {
-            sibling->right_child()->set_color(NodeBase<T>::Color::BLACK);
-        }
+        paint(sibling, node->parent()->color());
+        paint(node->parent(), node_color::BLACK);
+        paint(sibling->right_child(), node_color::BLACK);
         rotate_left(node->parent());
         return root_;
     }
 
-    // Обрабатывает симметричные случаи, когда узел — правый ребёнок.
     NodeBase<T>* erase_fixup_right(NodeBase<T>* node) {
         NodeBase<T>* sibling = node->parent()->left_child();
-        if (color_of(sibling) == NodeBase<T>::Color::RED) {
-            if (!is_nil(sibling)) {
-                sibling->set_color(NodeBase<T>::Color::BLACK);
-            }
-            node->parent()->set_color(NodeBase<T>::Color::RED);
+
+        if (is_red(sibling)) {
+            paint(sibling, node_color::BLACK);
+            paint(node->parent(), node_color::RED);
             rotate_right(node->parent());
             sibling = node->parent()->left_child();
         }
 
-        bool sibling_children_black =
-            color_of(sibling->right_child()) == NodeBase<T>::Color::BLACK &&
-            color_of(sibling->left_child()) == NodeBase<T>::Color::BLACK;
-        if (sibling_children_black) {
-            if (!is_nil(sibling)) {
-                sibling->set_color(NodeBase<T>::Color::RED);
-            }
+        if (is_black(sibling->left_child()) &&
+            is_black(sibling->right_child())) {
+            paint(sibling, node_color::RED);
             return node->parent();
         }
 
-        if (color_of(sibling->left_child()) == NodeBase<T>::Color::BLACK) {
-            if (!is_nil(sibling->right_child())) {
-                sibling->right_child()->set_color(NodeBase<T>::Color::BLACK);
-            }
-            if (!is_nil(sibling)) {
-                sibling->set_color(NodeBase<T>::Color::RED);
-            }
+        if (is_black(sibling->left_child())) {
+            paint(sibling->right_child(), node_color::BLACK);
+            paint(sibling, node_color::RED);
             rotate_left(sibling);
             sibling = node->parent()->left_child();
         }
 
-        if (!is_nil(sibling)) {
-            sibling->set_color(node->parent()->color());
-        }
-        node->parent()->set_color(NodeBase<T>::Color::BLACK);
-        if (!is_nil(sibling->left_child())) {
-            sibling->left_child()->set_color(NodeBase<T>::Color::BLACK);
-        }
+        paint(sibling, node->parent()->color());
+        paint(node->parent(), node_color::BLACK);
+        paint(sibling->left_child(), node_color::BLACK);
         rotate_right(node->parent());
         return root_;
     }
 
-    // Восстанавливает свойства дерева после удаления.
     void erase_fixup(NodeBase<T>* node) {
-        while (node != root_ &&
-               color_of(node) == NodeBase<T>::Color::BLACK) {
+        while (node != root_ && is_black(node)) {
             if (node == node->parent()->left_child()) {
                 node = erase_fixup_left(node);
             } else {
                 node = erase_fixup_right(node);
             }
         }
-        node->set_color(NodeBase<T>::Color::BLACK);
+
+        paint(node, node_color::BLACK);
     }
 
     //рекурсивно проверяет инваринты поддерева
