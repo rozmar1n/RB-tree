@@ -662,6 +662,53 @@ private:
         }
     }
 
+    // Исправляет двойной чёрный в направлении dir: разворачивает красного брата,
+    // перекрашивает sibling и parent и выполняет нужные повороты.
+    // Обеспечивает чёрного брата: если sibling красный, переворачиваем узлы.
+    void ensure_black_sibling(NodeBase<T>*& parent,
+                              NodeBase<T>*& sibling,
+                              Direction dir) {
+        if (is_red(sibling)) {
+            paint(sibling, node_color::BLACK);
+            paint(parent, node_color::RED);
+            rotate(parent, dir);
+            sibling = (dir == Direction::LEFT) ? parent->right_child()
+                                               : parent->left_child();
+        }
+    }
+
+    // Возвращает внутреннего и внешнего потомков брата относительно направления.
+    void fetch_sibling_children(NodeBase<T>* sibling,
+                                Direction dir,
+                                NodeBase<T>** inner,
+                                NodeBase<T>** outer) {
+        if (sibling == nullptr) {
+            *inner = *outer = nullptr;
+            return;
+        }
+        if (dir == Direction::LEFT) {
+            *inner = sibling->left_child();
+            *outer = sibling->right_child();
+        } else {
+            *inner = sibling->right_child();
+            *outer = sibling->left_child();
+        }
+    }
+
+    // Выполняет финальный поворот и перекраску после исправления двойного чёрного.
+    void apply_outer_rotation(NodeBase<T>*& node,
+                              NodeBase<T>*& parent,
+                              NodeBase<T>* sibling,
+                              NodeBase<T>* sibling_outer,
+                              Direction dir) {
+        paint(sibling, parent ? parent->color() : node_color::BLACK);
+        paint(parent, node_color::BLACK);
+        paint(sibling_outer, node_color::BLACK);
+        rotate(parent, dir);
+        node = root_;
+        parent = nullptr;
+    }
+
     void erase_fixup_direction(NodeBase<T>*& node,
                                NodeBase<T>*& parent,
                                Direction dir) {
@@ -674,25 +721,11 @@ private:
             (dir == Direction::LEFT) ? parent->right_child()
                                      : parent->left_child();
 
-        if (is_red(sibling)) {
-            paint(sibling, node_color::BLACK);
-            paint(parent, node_color::RED);
-            rotate(parent, dir);
-            sibling = (dir == Direction::LEFT) ? parent->right_child()
-                                               : parent->left_child();
-        }
+        ensure_black_sibling(parent, sibling, dir);
 
         NodeBase<T>* sibling_inner = nullptr;
         NodeBase<T>* sibling_outer = nullptr;
-        if (sibling != nullptr) {
-            if (dir == Direction::LEFT) {
-                sibling_inner = sibling->left_child();
-                sibling_outer = sibling->right_child();
-            } else {
-                sibling_inner = sibling->right_child();
-                sibling_outer = sibling->left_child();
-            }
-        }
+        fetch_sibling_children(sibling, dir, &sibling_inner, &sibling_outer);
 
         if (is_black(sibling_inner) && is_black(sibling_outer)) {
             paint(sibling, node_color::RED);
@@ -707,26 +740,13 @@ private:
             rotate(sibling,
                    (dir == Direction::LEFT) ? Direction::RIGHT
                                              : Direction::LEFT);
-            sibling = (dir == Direction::LEFT) ? parent->right_child()
-                                               : parent->left_child();
-            sibling_inner = sibling_outer = nullptr;
-            if (sibling != nullptr) {
-                if (dir == Direction::LEFT) {
-                    sibling_inner = sibling->left_child();
-                    sibling_outer = sibling->right_child();
-                } else {
-                    sibling_inner = sibling->right_child();
-                    sibling_outer = sibling->left_child();
-                }
-            }
+            sibling =
+                (dir == Direction::LEFT) ? parent->right_child()
+                                         : parent->left_child();
+            fetch_sibling_children(sibling, dir, &sibling_inner, &sibling_outer);
         }
 
-        paint(sibling, parent ? parent->color() : node_color::BLACK);
-        paint(parent, node_color::BLACK);
-        paint(sibling_outer, node_color::BLACK);
-        rotate(parent, dir);
-        node = root_;
-        parent = nullptr;
+        apply_outer_rotation(node, parent, sibling, sibling_outer, dir);
     }
 
     void erase_fixup(NodeBase<T>* node, NodeBase<T>* parent) {
