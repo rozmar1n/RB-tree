@@ -122,9 +122,7 @@ public:
 
     // Перемещает данные из другого дерева.
     Tree(Tree&& other) noexcept
-        : root_(other.root_) {
-        other.root_ = nullptr;
-    }
+        : root_(std::exchange(other.root_, nullptr)) {}
 
     // Копирующее присваивание по идиоме copy-and-swap.
     Tree& operator=(const Tree& other) {
@@ -138,12 +136,10 @@ public:
 
     // Перемещающее присваивание.
     Tree& operator=(Tree&& other) noexcept {
-        if (this == &other) {
-            return *this;
+        if (this != &other) {
+            Tree temp(std::move(other));
+            std::swap(root_, temp.root_);
         }
-        clear(root_);
-        root_ = other.root_;
-        other.root_ = nullptr;
         return *this;
     }
 
