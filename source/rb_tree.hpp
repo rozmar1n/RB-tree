@@ -172,7 +172,7 @@ public:
             parent->set_right_child(new_node);
         }
 
-        insert_case1(new_node);
+        fix_insert_root(new_node);
         update_size_upwards(new_node);
         return true;
     }
@@ -493,26 +493,26 @@ private:
     }
 
     // Обрабатывает случай вставки корневого узла.
-    void insert_case1(NodeBase<T>* node) {
+    void fix_insert_root(NodeBase<T>* node) {
         if (node->parent() == nullptr) {
             node->set_color(NodeBase<T>::Color::BLACK);
             root_ = node;
             return;
         }
-        insert_case2(node);
+        fix_insert_black_parent(node);
     }
 
     // Обрабатывает случай чёрного родителя.
-    void insert_case2(NodeBase<T>* node) {
+    void fix_insert_black_parent(NodeBase<T>* node) {
         NodeBase<T>* parent = node->parent();
         if (parent == nullptr || parent->color() == NodeBase<T>::Color::BLACK) {
             return;
         }
-        insert_case3(node);
+        fix_insert_red_uncle(node);
     }
 
     // Обрабатывает случай красного дяди.
-    void insert_case3(NodeBase<T>* node) {
+    void fix_insert_red_uncle(NodeBase<T>* node) {
         NodeBase<T>* u = uncle(node);
         if (u != nullptr && u->color() == NodeBase<T>::Color::RED) {
             node->parent()->set_color(NodeBase<T>::Color::BLACK);
@@ -520,15 +520,15 @@ private:
             NodeBase<T>* g = grandparent(node);
             if (g != nullptr) {
                 g->set_color(NodeBase<T>::Color::RED);
-                insert_case1(g);
+                fix_insert_root(g);
             }
         } else {
-            insert_case4(node);
+            fix_insert_inner_child(node);
         }
     }
 
     // Выполняет промежуточные повороты.
-    void insert_case4(NodeBase<T>* node) {
+    void fix_insert_inner_child(NodeBase<T>* node) {
         NodeBase<T>* parent = node->parent();
         NodeBase<T>* grand = grandparent(node);
         if (grand == nullptr || parent == nullptr) {
@@ -544,11 +544,11 @@ private:
             node = node->right_child();
         }
 
-        insert_case5(node);
+        finalize_insert_rebalance(node);
     }
 
     // Завершает восстановление баланса после вставки.
-    void insert_case5(NodeBase<T>* node) {
+    void finalize_insert_rebalance(NodeBase<T>* node) {
         NodeBase<T>* parent = node->parent();
         NodeBase<T>* grand = grandparent(node);
         if (parent == nullptr || grand == nullptr) {
@@ -574,64 +574,69 @@ private:
         return node;
     }
 
-    // Переустанавливает узлы перед удалением, возвращая данные для исправления.
-    DetachResult detach_node(NodeBase<T>* z) {
-        NodeBase<T>* y = z;
-        node_color removed_color = y->color();
-        NodeBase<T>* x = nullptr;
+    // Обрабатывает удаление узла, у которого отсутствует один из детей.
+    DetachResult detach_node_with_single_child(NodeBase<T>* z,
+                                              NodeBase<T>* child) {
+        NodeBase<T>* parent = z->parent();
+        NodeBase<T>* replacement = child;
+        transplant(z, replacement);
+
+        NodeBase<T>* fixup_parent = (replacement != nullptr) ? replacement->parent()
+                                                              : parent;
+        return {replacement, fixup_parent, z->color()};
+    }
+
+    // Обрабатывает удаление узла при наличии обоих детей, используя преемника.
+    DetachResult detach_node_with_successor(NodeBase<T>* z) {
+        NodeBase<T>* successor = minimum(z->right_child());
+        NodeBase<T>* x = successor->right_child();
+        node_color removed_color = successor->color();
+        bool successor_parent_is_z = (successor->parent() == z);
         NodeBase<T>* x_parent = nullptr;
 
-        if (is_nil(z->left_child())) {
-            x = z->right_child();
-            x_parent = z->parent();
-            transplant(z, z->right_child());
-            if (x != nullptr) {
-                x_parent = x->parent();
-            }
-        } else if (is_nil(z->right_child())) {
-            x = z->left_child();
-            x_parent = z->parent();
-            transplant(z, z->left_child());
-            if (x != nullptr) {
-                x_parent = x->parent();
+        if (!successor_parent_is_z) {
+            x_parent = successor->parent();
+            transplant(successor, successor->right_child());
+            successor->set_right_child(z->right_child());
+            if (successor->right_child() != nullptr) {
+                successor->right_child()->set_parent(successor);
             }
         } else {
-            y = minimum(z->right_child());
-            removed_color = y->color();
-            x = y->right_child();
-            bool y_parent_was_z = (y->parent() == z);
-
-            if (!y_parent_was_z) {
-                x_parent = y->parent();
-                transplant(y, y->right_child());
-                y->set_right_child(z->right_child());
-                if (y->right_child() != nullptr) {
-                    y->right_child()->set_parent(y);
-                }
-            } else {
-                x_parent = y;
-                if (x != nullptr) {
-                    x->set_parent(y);
-                }
-            }
-
-            transplant(z, y);
-            y->set_left_child(z->left_child());
-            if (y->left_child() != nullptr) {
-                y->left_child()->set_parent(y);
-            }
-            y->set_color(z->color());
-            recalc_size(y);
-            update_size_upwards(y);
-
+            x_parent = successor;
             if (x != nullptr) {
-                x_parent = x->parent();
-            } else if (y_parent_was_z) {
-                x_parent = y;
+                x->set_parent(successor);
             }
         }
 
+        transplant(z, successor);
+        successor->set_left_child(z->left_child());
+        if (successor->left_child() != nullptr) {
+            successor->left_child()->set_parent(successor);
+        }
+        successor->set_color(z->color());
+        recalc_size(successor);
+        update_size_upwards(successor);
+
+        if (x != nullptr) {
+            x_parent = x->parent();
+        } else if (successor_parent_is_z) {
+            x_parent = successor;
+        }
+
         return {x, x_parent, removed_color};
+    }
+
+    // Переустанавливает узлы перед удалением, возвращая данные для исправления.
+    DetachResult detach_node(NodeBase<T>* z) {
+        if (is_nil(z->left_child())) {
+            return detach_node_with_single_child(z, z->right_child());
+        }
+
+        if (is_nil(z->right_child())) {
+            return detach_node_with_single_child(z, z->left_child());
+        }
+
+        return detach_node_with_successor(z);
     }
 
     // Заменяет одно поддерево другим и обновляет накопленные размеры.
@@ -677,14 +682,17 @@ private:
                                                : parent->left_child();
         }
 
-        NodeBase<T>* sibling_inner =
-            sibling ? ((dir == Direction::LEFT) ? sibling->left_child()
-                                                : sibling->right_child())
-                    : nullptr;
-        NodeBase<T>* sibling_outer =
-            sibling ? ((dir == Direction::LEFT) ? sibling->right_child()
-                                                : sibling->left_child())
-                    : nullptr;
+        NodeBase<T>* sibling_inner = nullptr;
+        NodeBase<T>* sibling_outer = nullptr;
+        if (sibling != nullptr) {
+            if (dir == Direction::LEFT) {
+                sibling_inner = sibling->left_child();
+                sibling_outer = sibling->right_child();
+            } else {
+                sibling_inner = sibling->right_child();
+                sibling_outer = sibling->left_child();
+            }
+        }
 
         if (is_black(sibling_inner) && is_black(sibling_outer)) {
             paint(sibling, node_color::RED);
@@ -701,14 +709,16 @@ private:
                                              : Direction::LEFT);
             sibling = (dir == Direction::LEFT) ? parent->right_child()
                                                : parent->left_child();
-            sibling_inner = sibling ? ((dir == Direction::LEFT)
-                                           ? sibling->left_child()
-                                           : sibling->right_child())
-                                    : nullptr;
-            sibling_outer = sibling ? ((dir == Direction::LEFT)
-                                           ? sibling->right_child()
-                                           : sibling->left_child())
-                                    : nullptr;
+            sibling_inner = sibling_outer = nullptr;
+            if (sibling != nullptr) {
+                if (dir == Direction::LEFT) {
+                    sibling_inner = sibling->left_child();
+                    sibling_outer = sibling->right_child();
+                } else {
+                    sibling_inner = sibling->right_child();
+                    sibling_outer = sibling->left_child();
+                }
+            }
         }
 
         paint(sibling, parent ? parent->color() : node_color::BLACK);
