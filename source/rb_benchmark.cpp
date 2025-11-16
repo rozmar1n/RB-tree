@@ -106,13 +106,7 @@ BenchmarkResult run_rb_tree(const std::vector<Operation>& ops) {
             tree.insert(op.a);
         } else if (op.type == 'q') {
             size_t result = 0;
-            if (op.b > op.a) {
-                const size_t right_rank = tree.rank_upper_bound(op.b);
-                const size_t left_rank = tree.rank_upper_bound(op.a);
-                if (right_rank > left_rank) {
-                    result = right_rank - left_rank;
-                }
-            }
+            result = tree.distance(op.a, op.b);
             checksum += result;
         }
     }
@@ -135,7 +129,7 @@ BenchmarkResult run_std_set(const std::vector<Operation>& ops) {
         } else if (op.type == 'q') {
             size_t result = 0;
             if (op.b > op.a) {
-                const auto left_it = tree.upper_bound(op.a);
+                const auto left_it = tree.lower_bound(op.a);
                 const auto right_it = tree.upper_bound(op.b);
                 result = static_cast<std::size_t>(
                     std::distance(left_it, right_it));

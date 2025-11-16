@@ -15,13 +15,14 @@ void handle_query(rb::Tree<int>& tree,
                   std::ostream& output) {
     size_t result = 0;
 
-    if (right >= left) {
-        const size_t right_rank = tree.rank_upper_bound(right);
-        const size_t left_rank = tree.rank_lower_bound(left);
-        if (right_rank > left_rank) {
-            result = right_rank - left_rank;
-        }
-    }
+    result = tree.distance(left, right);
+    // if (right >= left) {
+    //     const size_t right_rank = tree.rank_comp_bound(right, rb::compare_upper_bound<int>);
+    //     const size_t left_rank = tree.rank_comp_bound(left, rb::compare_lower_bound<int>);
+    //     if (right_rank > left_rank) {
+    //         result = right_rank - left_rank;
+    //     }
+    // }
 
     if (!first_output) {
         output << ' ';

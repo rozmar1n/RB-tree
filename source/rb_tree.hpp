@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <functional>
 #include <limits>
 #include <vector>
 #include <type_traits>
@@ -53,6 +54,8 @@ protected:
           parent_(p),
           subtree_size_(subtree_size) {}
 
+    virtual ~NodeBase() {}
+
 private:
     Color color_;
     NodeBase* left_;
@@ -83,9 +86,21 @@ public:
     const T& value() const { return value_; }
     T& value() { return value_; }
 
+    ~Node() override {}
+
 private:
     T value_;
 };
+
+template <typename T>
+bool compare_lower_bound(const T& first, const T& second) {  
+    return first < second;
+}
+
+template <typename T>
+bool compare_upper_bound(const T& first, const T& second) {
+    return first <= second;
+}
 
 template <typename T>
 class Tree {
@@ -182,7 +197,7 @@ public:
 
         NodeBase<T>* z = result.parent;
         DetachResult detach = detach_node(z);
-        destroy_node(z);
+        delete z;
 
         if (detach.removed_color == node_color::BLACK) {
             erase_fixup(detach.fixup, detach.parent);
@@ -206,21 +221,15 @@ public:
         return validate_subtree(root, &black_height);
     }
 
-    // Возвращает количество элементов, расположенныхв диапазоне [first, second).
     size_t distance(const T& first, const T& second) const {
-        auto first_location = locate(first);
-        auto second_location = locate(second);
-
-        if (!first_location.exists || !second_location.exists) {
-            return std::numeric_limits<size_t>::max();
-        }
-
-        const size_t first_rank = rank_lower_bound(first);
-        const size_t second_rank = rank_lower_bound(second);
-
-        if (first_rank >= second_rank) {
+        if (first > second) { 
             return 0;
         }
+
+        size_t first_rank = rank_comp_bound(first, *compare_lower_bound<T>);
+        size_t second_rank = rank_comp_bound(second, *compare_upper_bound<T>);
+
+        assert(first_rank <= second_rank);
         return second_rank - first_rank;
     }
 
@@ -230,20 +239,23 @@ public:
         if (!location.exists) {
             return std::numeric_limits<size_t>::max();
         }
-        return rank_lower_bound(value);
+        return rank_comp_bound(value, compare_lower_bound<T>);
     }
 
     // Количество элементов в дереве.
     size_t size() const { return node_size(root_); }
 
-    // Количество элементов < value (индекс нижней границы); size(), если нет.
-    size_t rank_lower_bound(const T& value) const {
+
+    //TODO: итераторы, свои rank_lower_bound, upper_bound, которые возвращают итераторы, и потом передовать в std::distance
+
+    using cmp_t = std::function<bool(const T&, const T&)>; 
+    size_t rank_comp_bound(const T& value, cmp_t cmp) const {;
         const NodeBase<T>* current = root_;
         size_t result = 0;
 
         while (!is_nil(current)) {
             const T& current_value = as_node(current)->value();
-            if (current_value < value) {
+            if (cmp(current_value, value)) {
                 result += node_size(current->left_child()) + 1;
                 current = current->right_child();
             } else {
@@ -254,23 +266,6 @@ public:
         return result;
     }
 
-    // Количество элементов <= value (индекс верхней границы); size(), если нет.
-    size_t rank_upper_bound(const T& value) const {
-        const NodeBase<T>* current = root_;
-        size_t result = 0;
-
-        while (!is_nil(current)) {
-            const T& current_value = as_node(current)->value();
-            if (value < current_value) {
-                current = current->left_child();
-            } else {
-                result += node_size(current->left_child()) + 1;
-                current = current->right_child();
-            }
-        }
-
-        return result;
-    }
 
 private:
     // Вспомогательная структура для locate.
@@ -298,6 +293,7 @@ private:
     }
 
     // Приводит базовый указатель к константному типу Node<T>.
+    // TODO: подумать после лекции про виртальные функции (виртуальный деструктор)
     const Node<T>* as_node(const NodeBase<T>* node) const {
         return static_cast<const Node<T>*>(node);
     }
@@ -364,13 +360,6 @@ private:
         recalc_size(node);
         return node;
     }
-    
-    // Освобождает динамически выделенный узел.
-    void destroy_node(NodeBase<T>* node) {
-        if (node != nullptr) {
-            delete as_node(node);
-        }
-    }
 
     // Очищает поддерево, освобождая все узлы.
     void clear(NodeBase<T>* node) {
@@ -395,7 +384,7 @@ private:
                 stack.push_back(right);
             }
 
-            destroy_node(current);
+            delete current; 
         }
     }
 
@@ -851,5 +840,6 @@ private:
         return node_size(node);
     }
 };
+
 
 } // namespace rb
