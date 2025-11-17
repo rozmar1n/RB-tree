@@ -4,8 +4,10 @@
 #include <cstddef>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <vector>
 #include <type_traits>
+#include <iterator>
 #include <utility>
 
 namespace rb {
@@ -106,6 +108,7 @@ template <typename T>
 class Tree {
 public:
     enum class Direction { LEFT, RIGHT };
+    class iterator;
 
     static_assert(std::is_copy_constructible_v<T>,
                   "rb::Tree<T> requires T to be copy-constructible");
@@ -119,6 +122,88 @@ public:
                       decltype(std::declval<const T&>() < std::declval<const T&>()),
                       bool>,
                   "rb::Tree<T> requires operator< to establish a strict ordering");
+
+    class iterator {
+    public:
+        using value_type = T;
+        using difference_type = std::ptrdiff_t;
+        using reference = const T&;
+        using pointer = const T*;
+        using iterator_category = std::bidirectional_iterator_tag;
+
+        iterator() = default;
+
+        reference operator*() const {
+            assert(current_ != nullptr);
+            return owner_->as_node(current_)->value();
+        }
+
+        pointer operator->() const {
+            return std::addressof(operator*());
+        }
+
+        iterator& operator++() {
+            assert(current_ != nullptr);
+            current_ = owner_->next(current_);
+            return *this;
+        }
+
+        iterator operator++(int) {
+            auto tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+
+        iterator& operator--() {
+            if (!current_) {
+                current_ = owner_->maximum(owner_->root_);
+            } else {
+                current_ = owner_->prev(current_);
+            }
+            assert(current_ != nullptr);
+            return *this;
+        }
+
+        iterator operator--(int) {
+            auto tmp = *this;
+            --(*this);
+            return tmp;
+        }
+
+        bool operator==(const iterator& rhs) const {
+            assert(owner_ == rhs.owner_);
+            return current_ == rhs.current_;
+        }
+
+        bool operator!=(const iterator& rhs) const {
+            return !(*this == rhs);
+        }
+
+    private:
+        iterator(const Tree* owner, NodeBase<T>* current)
+            : owner_(owner), current_(current) {}
+
+        const Tree* owner_ = nullptr;
+        NodeBase<T>* current_ = nullptr;
+
+        friend class Tree;
+    };
+
+    iterator begin() {
+        return root_ ? iterator(this, minimum(root_)) : end();
+    }
+
+    iterator end() {
+        return iterator(this, nullptr);
+    }
+
+    iterator begin() const {
+        return root_ ? iterator(this, minimum(root_)) : end();
+    }
+
+    iterator end() const {
+        return iterator(this, nullptr);
+    }
 
     // Инициализирует пустое дерево.
     Tree()
@@ -245,8 +330,13 @@ public:
     // Количество элементов в дереве.
     size_t size() const { return node_size(root_); }
 
+    iterator lower_bound(const T& value) const {
+        return iterator(this, lower_bound_node(value));
+    }
 
-    //TODO: итераторы, свои rank_lower_bound, upper_bound, которые возвращают итераторы, и потом передовать в std::distance
+    iterator upper_bound(const T& value) const {
+        return iterator(this, upper_bound_node(value));
+    }
 
     using cmp_t = std::function<bool(const T&, const T&)>; 
     size_t rank_comp_bound(const T& value, cmp_t cmp) const {;
@@ -293,7 +383,6 @@ private:
     }
 
     // Приводит базовый указатель к константному типу Node<T>.
-    // TODO: подумать после лекции про виртальные функции (виртуальный деструктор)
     const Node<T>* as_node(const NodeBase<T>* node) const {
         return static_cast<const Node<T>*>(node);
     }
@@ -557,6 +646,79 @@ private:
             node = node->left_child();
         }
         return node;
+    }
+
+    // Возвращает максимальный узел в поддереве.
+    NodeBase<T>* maximum(NodeBase<T>* node) const {
+        while (node != nullptr && node->right_child() != nullptr) {
+            node = node->right_child();
+        }
+        return node;
+    }
+
+    // Возвращает следующий узел.
+    NodeBase<T>* next(NodeBase<T>* node) const {
+        if (node == nullptr) {
+            return nullptr;
+        }
+        if (node->right_child() != nullptr) {
+            return minimum(node->right_child());
+        }
+        NodeBase<T>* parent = node->parent();
+        while (parent != nullptr && node == parent->right_child()) {
+            node = parent;
+            parent = parent->parent();
+        }
+        return parent;
+    }
+
+    // Возвращает предыдущий узел.
+    NodeBase<T>* prev(NodeBase<T>* node) const {
+        if (node == nullptr) {
+            return nullptr;
+        }
+        if (node->left_child() != nullptr) {
+            return maximum(node->left_child());
+        }
+        NodeBase<T>* parent = node->parent();
+        while (parent != nullptr && node == parent->left_child()) {
+            node = parent;
+            parent = parent->parent();
+        }
+        return parent;
+    }
+
+    template <typename Compare>
+    NodeBase<T>* bound_node(const T& value, Compare go_left) const {
+        NodeBase<T>* current = root_;
+        NodeBase<T>* result = nullptr;
+
+        while (current != nullptr) {
+            const T& current_value = as_node(current)->value();
+            if (go_left(value, current_value)) {
+                result = current;
+                current = current->left_child();
+            } else {
+                current = current->right_child();
+            }
+        }
+        return result;
+    }
+
+    NodeBase<T>* lower_bound_node(const T& value) const {
+        return bound_node(
+            value,
+            [](const T& target, const T& candidate) {
+                return candidate >= target;
+            });
+    }
+
+    NodeBase<T>* upper_bound_node(const T& value) const {
+        return bound_node(
+            value,
+            [](const T& target, const T& candidate) {
+                return candidate > target;
+            });
     }
 
     // Обрабатывает удаление узла, у которого отсутствует один из детей.

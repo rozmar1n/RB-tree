@@ -40,7 +40,19 @@ target_link_libraries(rb_cli_test
         GTest::gtest_main
 )
 
+add_executable(rb_cli_iter_test
+    rb_cli_iter_test.cpp
+)
+
+target_link_libraries(rb_cli_iter_test
+    PRIVATE
+        rb_tree
+        rb_tree_cli_iter_lib
+        GTest::gtest_main
+)
+
 include(GoogleTest)
 gtest_discover_tests(rb_balance_test)
 gtest_discover_tests(rb_memory_test)
 gtest_discover_tests(rb_cli_test)
+gtest_discover_tests(rb_cli_iter_test)

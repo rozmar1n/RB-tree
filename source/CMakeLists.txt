@@ -13,6 +13,14 @@ target_link_libraries(rb_tree_cli_lib
         rb_tree
 )
 
+add_library(rb_tree_cli_iter_lib STATIC
+    rb_tree_cli_iter_lib.cpp
+)
+target_link_libraries(rb_tree_cli_iter_lib
+    PUBLIC
+        rb_tree
+)
+
 add_executable(rb_tree_cli rb_tree.cpp)
 target_link_libraries(rb_tree_cli
     PRIVATE
