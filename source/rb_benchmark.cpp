@@ -96,7 +96,7 @@ struct BenchmarkResult {
     std::size_t checksum = 0;
 };
 
-BenchmarkResult run_rb_tree(const std::vector<Operation>& ops) {
+BenchmarkResult run_rb_tree_rank_distance(const std::vector<Operation>& ops) {
     rb::Tree<int> tree;
     std::size_t checksum = 0;
 
@@ -107,6 +107,33 @@ BenchmarkResult run_rb_tree(const std::vector<Operation>& ops) {
         } else if (op.type == 'q') {
             size_t result = 0;
             result = tree.distance(op.a, op.b);
+            checksum += result;
+        }
+    }
+    const auto end = std::chrono::steady_clock::now();
+
+    return BenchmarkResult{
+        .elapsed = end - start,
+        .checksum = checksum,
+    };
+}
+
+BenchmarkResult run_rb_tree_iter_distance(const std::vector<Operation>& ops) {
+    rb::Tree<int> tree;
+    std::size_t checksum = 0;
+
+    const auto start = std::chrono::steady_clock::now();
+    for (const auto& op : ops) {
+        if (op.type == 'k') {
+            tree.insert(op.a);
+        } else if (op.type == 'q') {
+            size_t result = 0;
+            if (op.b > op.a) {
+                const auto left_it = tree.lower_bound(op.a);
+                const auto right_it = tree.upper_bound(op.b);
+                result = static_cast<std::size_t>(
+                    std::distance(left_it, right_it));
+            }
             checksum += result;
         }
     }
@@ -169,11 +196,14 @@ int main(int argc, char* argv[]) {
 
     print_header(opts);
 
-    const auto rb_result = run_rb_tree(workload);
+    const auto rb_result_rank = run_rb_tree_rank_distance(workload);
+    print_result("rb::Tree::distance      ", rb_result_rank);
+    
+    const auto rb_result_iter = run_rb_tree_iter_distance(workload);
+    print_result("rb::Tree + std::distance", rb_result_iter);
+    
     const auto std_result = run_std_set(workload);
-
-    print_result("rb::Tree", rb_result);
-    print_result("std::set", std_result);
+    print_result("std::set                ", std_result);
 
     return 0;
 }
